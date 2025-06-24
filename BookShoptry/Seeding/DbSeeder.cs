@@ -54,15 +54,15 @@ namespace BookShoptry.Seeding
             if (!context.Customers.Any())
             {
                 context.Customers.AddRange(
-                    new Customer { Username = "Anna Kowalska", Email = "anna@example.com" },
-                    new Customer { Username = "Jan Nowak", Email = "jan@example.com" },
-                    new Customer { Username = "Anna Kowalska", Email = "anna@example.com" },
-                    new Customer { Username = "Jan Nowak", Email = "jan@example.com" },
-                    new Customer { Username = "Piotr Zieliński", Email = "piotr@example.com" },
-                    new Customer { Username = "Katarzyna Wiśniewska", Email = "kasia@example.com" },
-                    new Customer { Username = "Tomasz Wójcik", Email = "tomasz@example.com" },
-                    new Customer { Username = "Magdalena Lewandowska", Email = "magda@example.com" },
-                    new Customer { Username = "Marek Dąbrowski", Email = "marek@example.com" }
+                    new Customer { Username = "Anna Kowalska", Email = "anna@example.com", Role = "User"},
+                    new Customer { Username = "Jan Nowak", Email = "jan@example.com", Role = "User" },
+                    new Customer { Username = "Anna Kowalska", Email = "anna@example.com", Role = "User" },
+                    new Customer { Username = "Jan Nowak", Email = "jan@example.com", Role = "User" },
+                    new Customer { Username = "Piotr Zieliński", Email = "piotr@example.com", Role = "User" },
+                    new Customer { Username = "Katarzyna Wiśniewska", Email = "kasia@example.com", Role = "User" },
+                    new Customer { Username = "Tomasz Wójcik", Email = "tomasz@example.com", Role = "User" },
+                    new Customer { Username = "Magdalena Lewandowska", Email = "magda@example.com", Role = "User" },
+                    new Customer { Username = "Marek Dąbrowski", Email = "marek@example.com", Role = "User" }
                 );
                 context.SaveChanges();
             }

@@ -1,14 +1,17 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using AutoMapper;
 using BookShoptry.Data;
 using BookShoptry.Models;
 using BookShoptry.Dtos;
+using System.Security.Claims;
 
 namespace BookShoptry.Controllers
 {
     [ApiController]
     [Route("[controller]")]
+    [Authorize]
     public class CartController : ControllerBase
     {
         private readonly StoreContext _context;
@@ -20,33 +23,40 @@ namespace BookShoptry.Controllers
             _mapper = mapper;
         }
 
-        // GET /Cart/user/1
         [HttpGet("customer/{customerId}")]
         public async Task<IActionResult> GetCartForCustomer(int customerId)
         {
+            var userId = int.Parse(User.FindFirstValue("id") ?? "0");
+            var role = User.FindFirstValue(ClaimTypes.Role);
+
+            if (role != "Admin" && userId != customerId)
+                return Unauthorized("You can only access your own cart.");
+
             var cart = await _context.Carts
                 .Include(c => c.Items)
-                    .ThenInclude(i => i.Product) // ← tutaj dociągamy dane produktu
+                .ThenInclude(i => i.Product)
                 .FirstOrDefaultAsync(c => c.CustomerId == customerId);
 
             if (cart == null)
-                return NotFound("Koszyk nie został znaleziony.");
+                return NotFound("Cart not found.");
 
-            var cartDto = _mapper.Map<CartDto>(cart); // automatyczne mapowanie
+            var cartDto = _mapper.Map<CartDto>(cart);
             return Ok(cartDto);
         }
-        // POST /Cart/add
+
         [HttpPost("add")]
         public async Task<IActionResult> AddToCart([FromBody] CartItemCreateDto dto)
         {
-            // Sprawdź, czy klient istnieje
+            var userId = int.Parse(User.FindFirstValue("id") ?? "0");
+            var role = User.FindFirstValue(ClaimTypes.Role);
+
+            if (role != "Admin" && userId != dto.CustomerId)
+                return Unauthorized("You can only modify your own cart.");
+
             var customer = await _context.Customers.FindAsync(dto.CustomerId);
             if (customer == null)
-            {
                 return NotFound("Customer not found");
-            }
 
-            // Pobierz lub utwórz koszyk dla klienta
             var cart = await _context.Carts
                 .Include(c => c.Items)
                 .FirstOrDefaultAsync(c => c.CustomerId == dto.CustomerId);
@@ -59,63 +69,57 @@ namespace BookShoptry.Controllers
                     Items = new List<CartItem>()
                 };
                 _context.Carts.Add(cart);
-                await _context.SaveChangesAsync(); // zapisujemy, żeby mieć ID koszyka
+                await _context.SaveChangesAsync();
             }
 
-            // Pobierz produkt
             var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == dto.ProductId);
             if (product == null)
-            {
                 return NotFound("Product not found");
-            }
 
-            // Dodaj przedmiot do koszyka
             var cartItem = new CartItem
             {
                 ProductId = dto.ProductId,
                 Quantity = dto.Quantity,
                 CartId = cart.Id,
-                Product = product // to zapewni dostęp do Title i Price
+                Product = product
             };
 
             cart.Items.Add(cartItem);
             await _context.SaveChangesAsync();
 
-            // Wczytaj pełny koszyk z produktami
             var fullCart = await _context.Carts
                 .Include(c => c.Items)
-                    .ThenInclude(i => i.Product)
+                .ThenInclude(i => i.Product)
                 .FirstOrDefaultAsync(c => c.Id == cart.Id);
 
             var result = _mapper.Map<CartDto>(fullCart);
             return Ok(result);
         }
 
-
-        // PUT /Cart/update
         [HttpPut("update")]
         public async Task<IActionResult> UpdateCartItem([FromBody] CartItemCreateDto dto)
         {
+            var userId = int.Parse(User.FindFirstValue("id") ?? "0");
+            var role = User.FindFirstValue(ClaimTypes.Role);
+
+            if (role != "Admin" && userId != dto.CustomerId)
+                return Unauthorized("You can only modify your own cart.");
+
             var cart = await _context.Carts
                 .Include(c => c.Items)
                 .ThenInclude(i => i.Product)
                 .FirstOrDefaultAsync(c => c.CustomerId == dto.CustomerId);
 
             if (cart == null)
-            {
                 return NotFound("Cart not found");
-            }
 
             var item = cart.Items.FirstOrDefault(i => i.ProductId == dto.ProductId);
             if (item == null)
-            {
                 return NotFound("Product not found in cart");
-            }
 
             item.Quantity = dto.Quantity;
             await _context.SaveChangesAsync();
 
-            // Mapuj tylko zmodyfikowaną pozycję
             var result = new
             {
                 customerId = cart.CustomerId,
@@ -131,41 +135,38 @@ namespace BookShoptry.Controllers
             return Ok(result);
         }
 
-
-
-        // DELETE /Cart/remove/5
         [HttpDelete("remove")]
         public async Task<IActionResult> RemoveFromCart([FromBody] CartItemCreateDto dto)
         {
+            var userId = int.Parse(User.FindFirstValue("id") ?? "0");
+            var role = User.FindFirstValue(ClaimTypes.Role);
+
+            if (role != "Admin" && userId != dto.CustomerId)
+                return Unauthorized("You can only modify your own cart.");
+
             var cart = await _context.Carts
                 .Include(c => c.Items)
+                .ThenInclude(i => i.Product)
                 .FirstOrDefaultAsync(c => c.CustomerId == dto.CustomerId);
 
             if (cart == null)
-            {
                 return NotFound("Cart not found");
-            }
 
             var cartItem = cart.Items.FirstOrDefault(i => i.ProductId == dto.ProductId);
             if (cartItem == null)
-            {
                 return NotFound("Product not found in cart");
-            }
 
             if (cartItem.Quantity <= dto.Quantity)
             {
-                // Usuwamy całą pozycję
                 _context.CartItems.Remove(cartItem);
             }
             else
             {
-                // Zmniejszamy ilość
                 cartItem.Quantity -= dto.Quantity;
             }
 
             await _context.SaveChangesAsync();
 
-            // Zwróć zaktualizowany koszyk
             var updatedCart = await _context.Carts
                 .Include(c => c.Items)
                 .ThenInclude(i => i.Product)
@@ -174,6 +175,5 @@ namespace BookShoptry.Controllers
             var result = _mapper.Map<CartDto>(updatedCart);
             return Ok(result);
         }
-
     }
 }
