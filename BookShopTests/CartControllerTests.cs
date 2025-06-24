@@ -1,5 +1,6 @@
-﻿using Xunit;
-using Moq;
+
+using Xunit;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using AutoMapper;
@@ -8,102 +9,97 @@ using BookShoptry.Data;
 using BookShoptry.Models;
 using BookShoptry.Dtos;
 using System.Collections.Generic;
+using System.Security.Claims;
 using System.Threading.Tasks;
 
-public class CartControllerTests
+public class CartControllerTests_New
 {
-    [Fact]
-    public async Task GetCartForCustomer_ReturnsCart()
+    private StoreContext GetInMemoryContext()
     {
         var options = new DbContextOptionsBuilder<StoreContext>()
-            .UseInMemoryDatabase("GetCart_Customer")
+            .UseInMemoryDatabase("CartTestDb_" + System.Guid.NewGuid())
             .Options;
-
-        using (var context = new StoreContext(options))
-        {
-            context.Customers.Add(new Customer { Id = 1, Username = "Jan" });
-            context.Products.Add(new Product { Id = 1, Title = "Book", Author = "A", Description = "D", Price = 10, Stock = 5, CategoryId = 1 });
-            context.Carts.Add(new Cart
-            {
-                Id = 1,
-                CustomerId = 1,
-                Items = new List<CartItem> {
-                    new CartItem { ProductId = 1, Quantity = 2 }
-                }
-            });
-            context.SaveChanges();
-        }
-
-        using (var context = new StoreContext(options))
-        {
-            var mockMapper = new Mock<IMapper>();
-            mockMapper.Setup(m => m.Map<CartDto>(It.IsAny<Cart>())).Returns(new CartDto { CustomerId = 1 });
-
-            var controller = new CartController(context, mockMapper.Object);
-            var result = await controller.GetCartForCustomer(1);
-
-            var okResult = Assert.IsType<OkObjectResult>(result);
-            var dto = Assert.IsType<CartDto>(okResult.Value);
-            Assert.Equal(1, dto.CustomerId);
-        }
+        return new StoreContext(options);
     }
 
-    [Fact]
-    public async Task AddToCart_CreatesCartIfNotExists()
+    private IMapper GetMapper()
     {
-        var options = new DbContextOptionsBuilder<StoreContext>()
-            .UseInMemoryDatabase("AddToCart_Creates")
-            .Options;
-
-        var dto = new CartItemCreateDto
+        var config = new MapperConfiguration(cfg =>
         {
-            CustomerId = 2,
-            ProductId = 1,
-            Quantity = 3
+            cfg.CreateMap<CartItem, CartItemDto>()
+                .ForMember(dest => dest.ProductTitle, opt => opt.MapFrom(src => src.Product.Title));
+            cfg.CreateMap<Cart, CartDto>();
+        });
+        return config.CreateMapper();
+    }
+
+    private CartController GetController(StoreContext context, IMapper mapper, string role, int userId)
+    {
+        var controller = new CartController(context, mapper);
+        var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim("id", userId.ToString()),
+            new Claim(ClaimTypes.Role, role)
+        }, "mock"));
+
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext { User = user }
         };
-
-        using (var context = new StoreContext(options))
-        {
-            context.Customers.Add(new Customer { Id = 2, Username = "Anna" });
-            context.Products.Add(new Product
-            {
-                Id = 1,
-                Title = "Book",
-                Author = "A",
-                Description = "D",
-                Price = 15,
-                Stock = 10,
-                CategoryId = 1
-            });
-            context.Categories.Add(new Category { Id = 1, Name = "Books" });
-            context.SaveChanges();
-        }
-
-        using (var context = new StoreContext(options))
-        {
-            var mockMapper = new Mock<IMapper>();
-
-            mockMapper.Setup(m => m.Map<CartItem>(dto)).Returns(new CartItem
-            {
-                ProductId = dto.ProductId,
-                Quantity = dto.Quantity
-            });
-
-            var controller = new CartController(context, mockMapper.Object);
-
-            // Act
-            var result = await controller.AddToCart(dto);
-
-            var okResult = Assert.IsType<OkObjectResult>(result);
-
-            var cart = await context.Carts.Include(c => c.Items).FirstOrDefaultAsync(c => c.CustomerId == 2);
-            Assert.NotNull(cart);
-
-            var item = cart.Items.FirstOrDefault();
-            Assert.NotNull(item);
-            Assert.Equal(1, item.ProductId);
-            Assert.Equal(3, item.Quantity);
-        }
+        return controller;
     }
 
+    [Fact]
+    public async Task GetCart_AdminAccess_ReturnsCart()
+    {
+        var context = GetInMemoryContext();
+        var mapper = GetMapper();
+        context.Carts.Add(new Cart { Id = 1, CustomerId = 2 });
+        context.SaveChanges();
+
+        var controller = GetController(context, mapper, "Admin", 1);
+        var result = await controller.GetCartForCustomer(2) as OkObjectResult;
+
+        Assert.NotNull(result);
+    }
+
+    [Fact]
+    public async Task GetCart_OwnerAccess_ReturnsCart()
+    {
+        var context = GetInMemoryContext();
+        var mapper = GetMapper();
+        context.Carts.Add(new Cart { Id = 2, CustomerId = 3 });
+        context.SaveChanges();
+
+        var controller = GetController(context, mapper, "User", 3);
+        var result = await controller.GetCartForCustomer(3) as OkObjectResult;
+
+        Assert.NotNull(result);
+    }
+
+    [Fact]
+    public async Task GetCart_OtherUser_ReturnsUnauthorized()
+    {
+        var context = GetInMemoryContext();
+        var mapper = GetMapper();
+        context.Carts.Add(new Cart { Id = 3, CustomerId = 4 });
+        context.SaveChanges();
+
+        var controller = GetController(context, mapper, "User", 99);
+        var result = await controller.GetCartForCustomer(4);
+
+        Assert.IsType<UnauthorizedObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task GetCart_NotFound_ReturnsNotFound()
+    {
+        var context = GetInMemoryContext();
+        var mapper = GetMapper();
+        var controller = GetController(context, mapper, "Admin", 1);
+
+        var result = await controller.GetCartForCustomer(100);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
 }

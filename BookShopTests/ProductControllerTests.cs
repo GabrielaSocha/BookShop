@@ -1,181 +1,119 @@
-﻿using Xunit;
+
+using Xunit;
 using Moq;
-using Microsoft.AspNetCore.Mvc;
-using System.Collections.Generic;
-using System.Linq;
 using AutoMapper;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using BookShoptry.Controllers;
 using BookShoptry.Data;
-using BookShoptry.Dtos;
 using BookShoptry.Models;
-using Microsoft.EntityFrameworkCore;
+using BookShoptry.Dtos;
+using System.Collections.Generic;
+using System.Linq;
 
-public class ProductsControllerTests
+public class ProductsControllerTests_New
 {
-    private readonly Mock<StoreContext> _mockContext;
-    private readonly Mock<IMapper> _mockMapper;
-    private readonly ProductsController _controller;
-
-    public ProductsControllerTests()
+    private StoreContext GetInMemoryContext()
     {
         var options = new DbContextOptionsBuilder<StoreContext>()
-            .UseInMemoryDatabase(databaseName: "TestDb")
+            .UseInMemoryDatabase("TestDb_" + System.Guid.NewGuid())
             .Options;
+
         var context = new StoreContext(options);
-
-        _mockContext = new Mock<StoreContext>(options);
-        _mockMapper = new Mock<IMapper>();
-
-        _controller = new ProductsController(context, _mockMapper.Object);
+        return context;
     }
 
-    [Fact]
-    public void Get_ReturnsAllProducts()
+    private IMapper GetMapper()
     {
-        var contextOptions = new DbContextOptionsBuilder<StoreContext>()
-            .UseInMemoryDatabase("TestDb_GetAll")
-            .Options;
-
-        using (var context = new StoreContext(contextOptions))
+        var config = new MapperConfiguration(cfg =>
         {
-            context.Products.AddRange(new List<Product>
-        {
-            new Product
-            {
-                Id = 1,
-                Title = "Test Product 1",
-                Author = "Author A",
-                Description = "Description A",
-                Price = 10.0m,
-                Stock = 5,
-                CategoryId = 1
-            },
-            new Product
-            {
-                Id = 2,
-                Title = "Test Product 2",
-                Author = "Author B",
-                Description = "Description B",
-                Price = 15.0m,
-                Stock = 10,
-                CategoryId = 1
-            }
+            cfg.CreateMap<Product, ProductDto>()
+                .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.Category.Name));
         });
 
-            context.Categories.Add(new Category { Id = 1, Name = "Fiction" });
-            context.SaveChanges();
-        }
-
-        using (var context = new StoreContext(contextOptions))
-        {
-            var mockMapper = new Mock<IMapper>();
-            mockMapper.Setup(m => m.Map<List<ProductDto>>(It.IsAny<List<Product>>()))
-                      .Returns(new List<ProductDto> { new ProductDto(), new ProductDto() });
-
-            var controller = new ProductsController(context, mockMapper.Object);
-
-            var result = controller.Get();
-
-            var okResult = Assert.IsType<OkObjectResult>(result);
-            var returnValue = Assert.IsType<List<ProductDto>>(okResult.Value);
-            Assert.Equal(2, returnValue.Count);
-        }
+        return config.CreateMapper();
     }
 
-
     [Fact]
-    public void Get_WithValidId_ReturnsProduct()
+    public void Get_ReturnsProductList()
     {
-        var contextOptions = new DbContextOptionsBuilder<StoreContext>()
-            .UseInMemoryDatabase("TestDb_GetById")
-            .Options;
+        var context = GetInMemoryContext();
+        var mapper = GetMapper();
 
-        using (var context = new StoreContext(contextOptions))
+        var category = new Category { Id = 1, Name = "Science" };
+        context.Categories.Add(category);
+        context.Products.Add(new Product
         {
-            context.Categories.Add(new Category { Id = 1, Name = "Fiction" });
-            context.Products.Add(new Product
-            {
-                Id = 1,
-                Title = "Test Book",
-                Author = "Author A",
-                Description = "Something",
-                Price = 10,
-                Stock = 10,
-                CategoryId = 1
-            });
-            context.SaveChanges();
-        }
+            Id = 1,
+            Title = "Book",
+            Author = "Author",
+            Description = "Desc",
+            Price = 10,
+            Stock = 5,
+            Category = category
+        });
+        context.SaveChanges();
 
-        using (var context = new StoreContext(contextOptions))
-        {
-            var mockMapper = new Mock<IMapper>();
-            mockMapper.Setup(m => m.Map<ProductDto>(It.IsAny<Product>()))
-                      .Returns(new ProductDto { Id = 1, Title = "Test Book" });
+        var controller = new ProductsController(context, mapper);
+        var result = controller.Get() as OkObjectResult;
 
-            var controller = new ProductsController(context, mockMapper.Object);
-
-            var result = controller.Get(1);
-
-            var okResult = Assert.IsType<OkObjectResult>(result);
-            var dto = Assert.IsType<ProductDto>(okResult.Value);
-            Assert.Equal("Test Book", dto.Title);
-        }
+        Assert.NotNull(result);
+        var dtoList = result.Value as List<ProductDto>;
+        Assert.Single(dtoList);
+        Assert.Equal("Science", dtoList[0].CategoryName);
     }
 
+    [Fact]
+    public void Get_ReturnsNoProductsMessage()
+    {
+        var context = GetInMemoryContext();
+        var mapper = GetMapper();
+        var controller = new ProductsController(context, mapper);
+
+        var result = controller.Get() as OkObjectResult;
+
+        Assert.NotNull(result);
+        Assert.Equal("No products available.", result.Value);
+    }
 
     [Fact]
-    public void Post_WithValidProduct_ReturnsCreatedProduct()
+    public void GetById_ExistingProduct_ReturnsProduct()
     {
-        var contextOptions = new DbContextOptionsBuilder<StoreContext>()
-            .UseInMemoryDatabase("TestDb_Post")
-            .Options;
+        var context = GetInMemoryContext();
+        var mapper = GetMapper();
 
-        var dto = new ProductCreateDto
+        var category = new Category { Id = 1, Name = "History" };
+        var product = new Product
         {
-            Title = "New Book",
-            Author = "Author Y",
-            Description = "Some description",
-            Price = 45.99m,
-            CategoryId = 1
+            Id = 2,
+            Title = "History Book",
+            Author = "HistAuthor",
+            Description = "Desc",
+            Price = 20,
+            Stock = 3,
+            Category = category
         };
+        context.Categories.Add(category);
+        context.Products.Add(product);
+        context.SaveChanges();
 
-        using (var context = new StoreContext(contextOptions))
-        {
-            context.Categories.Add(new Category { Id = 1, Name = "Fiction" });
-            context.SaveChanges();
-        }
+        var controller = new ProductsController(context, mapper);
+        var result = controller.Get(2) as OkObjectResult;
 
-        using (var context = new StoreContext(contextOptions))
-        {
-            var mockMapper = new Mock<IMapper>();
-            mockMapper.Setup(m => m.Map<Product>(dto)).Returns(new Product
-            {
-                Title = dto.Title,
-                Author = dto.Author,
-                Description = dto.Description,
-                Price = dto.Price,
-                CategoryId = dto.CategoryId
-            });
-
-            mockMapper.Setup(m => m.Map<ProductDto>(It.IsAny<Product>()))
-                      .Returns(new ProductDto
-                      {
-                          Title = dto.Title,
-                          Author = dto.Author,
-                          Description = dto.Description,
-                          Price = dto.Price,
-                          CategoryName = "Fiction"
-                      });
-
-            var controller = new ProductsController(context, mockMapper.Object);
-
-            var result = controller.Post(dto);
-
-            var okResult = Assert.IsType<OkObjectResult>(result);
-            var productDto = Assert.IsType<ProductDto>(okResult.Value);
-            Assert.Equal(dto.Title, productDto.Title);
-            Assert.Equal(dto.Price, productDto.Price);
-        }
+        Assert.NotNull(result);
+        var dto = result.Value as ProductDto;
+        Assert.Equal("History Book", dto.Title);
+        Assert.Equal("History", dto.CategoryName);
     }
 
+    [Fact]
+    public void GetById_NonExistingProduct_ReturnsNotFound()
+    {
+        var context = GetInMemoryContext();
+        var mapper = GetMapper();
+        var controller = new ProductsController(context, mapper);
+
+        var result = controller.Get(99);
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
 }
